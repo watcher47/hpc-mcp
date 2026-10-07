@@ -1,0 +1,57 @@
+# Local design and migration workspace (archived records live under docs/).
+.sdd/
+.superpowers/
+
+# Python environments and caches.
+.venv/
+.uv-bootstrap/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Coverage, package, and build output.
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+*.whl
+
+# Local staging copies and runtime state.
+.staging/
+staging/
+*-staging/
+*_staging/
+*-stage/
+*_stage/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+servers.json
+.env
+.env.*
+!.env.example
+id_rsa
+id_ed25519
+*.pem
+*.key
+*.pfx
+*.p12
+state/
+*.zip
+*.tar.gz

@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hpc-codex-mcp"
+version = "0.1.0"
+description = "Local SSH and Slurm MCP for Codex"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+  "asyncssh>=2.21,<3",
+  "fastmcp>=4.0,<5",
+  "jsonschema>=4.23,<5",
+  "pathspec>=0.12,<1",
+  "platformdirs>=4.4,<5",
+  "pydantic>=2.11,<3",
+  "referencing>=0.36,<1",
+  "typer>=0.17,<1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "pytest-cov>=6.2,<7",
+]
+
+[project.scripts]
+hpc-mcp = "hpc_mcp.server:main"
+hpc-setup = "hpc_mcp.setup.cli:app"
+hpc-agent = "hpc_mcp.agent.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/watcher47/hpc-mcp"
+Repository = "https://github.com/watcher47/hpc-mcp"
+Issues = "https://github.com/watcher47/hpc-mcp/issues"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src", "scripts/configure_windows.py", "skills", "tests", "README.md", "AGENTS.md",
+  "LICENSE", "pyproject.toml", "uv.lock", ".gitignore",
+  "docs/install-with-codex.md", "docs/configuration.md", "docs/release-v0.1.0.md",
+  "docs/windows-setup.md", "docs/native-queue-handoff.md", "docs/agent-delivery-diagnostics.md",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hpc_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills/hpc-slurm-workflow/SKILL.md" = "hpc_mcp/skills/hpc-slurm-workflow/SKILL.md"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["real_cluster: requires explicit real-cluster credentials"]
