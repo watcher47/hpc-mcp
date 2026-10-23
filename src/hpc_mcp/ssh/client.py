@@ -90,7 +90,7 @@ class SshClient:
                     process = await connection.create_process(
                         rendered,
                         encoding=None,
-                        stdin=asyncssh.DEVNULL,
+                        **({'stdin':asyncssh.DEVNULL} if validated.standard_input is None else {'input':validated.standard_input}),
                     )
                     stdout_result, stderr_result, _ = await asyncio.gather(
                         self._drain_output(process.stdout),
@@ -109,8 +109,8 @@ class SshClient:
         stderr, stderr_truncated = stderr_result
         return CommandResult(
             exit_status=process.exit_status,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=self._redact(stdout),
+            stderr=self._redact(stderr),
             truncated=stdout_truncated or stderr_truncated,
         )
 

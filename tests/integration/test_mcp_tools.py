@@ -13,6 +13,8 @@ from hpc_mcp.remote.patch import TextEdit
 
 REQUEST = "00000000-0000-4000-8000-000000000001"
 CASES = [
+    ("slurm_cancel_job", "slurm_cancel", "cancel_job", {"job_id": "123", "request_id": REQUEST, "server_alias": "cluster"}),
+    ("slurm_gpu_inventory", "slurm_gpu", "inventory", {"project_id": "p"}),
     ("slurm_watch_job", "slurm_watch", "verify", {"job_id": "123", "server_alias": "cluster"}),
     ("server_list", "general_ssh", "server_list", {}),
     ("ssh_execute", "general_ssh", "execute", {"cmd_string": "squeue --me", "server_alias": "cluster", "directory": "/work", "timeout_ms": 1000}),
@@ -84,7 +86,7 @@ async def test_single_service_call_and_serialized_success(fake_container, name, 
         result = await client.call_tool(name, arguments)
     assert result.data == {"ok": True, "value": "service result"}
     expected = dict(arguments)
-    if name == "slurm_submit":
+    if name in {"slurm_submit", "slurm_cancel_job"}:
         expected["request_id"] = UUID(REQUEST)
     if name == "remote_apply_patch":
         expected["edits"] = [TextEdit("a", "b", 1)]
@@ -105,6 +107,8 @@ async def test_domain_error_has_stable_tool_failure(fake_container, name, group,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name,arguments", [
+    ("slurm_cancel_job", {"job_id": "123,124", "request_id": REQUEST}),
+    ("slurm_cancel_job", {"job_id": "123", "request_id": "invalid"}),
     ("slurm_submit", {"project_id": "p", "script_path": "job", "request_id": "invalid"}),
     ("remote_apply_patch", {"project_id": "p", "relative_path": "a", "expected_sha256": "a" * 64, "edits": [{"old_text": "", "new_text": "b"}]}),
     ("ssh_execute", {"cmd_string": "pwd", "timeout_ms": True}),
@@ -117,6 +121,24 @@ async def test_invalid_structured_inputs_do_not_call_service(fake_container, nam
         result = await client.call_tool(name, arguments, raise_on_error=False)
     assert result.is_error
     assert fake_container.calls == []
+
+
+@pytest.mark.parametrize('name', ['slurm_preview', 'slurm_submit'])
+async def test_gpu_selection_uses_real_mcp_schema(fake_container, name):
+    from hpc_mcp.server import create_server
+    from hpc_mcp.slurm.gpu import GpuSelection
+    arguments = {'project_id':'p', 'script_path':'job.sbatch', 'gpu_selection': {'mode':'exact', 'indices':[4, 0]}}
+    if name == 'slurm_submit': arguments['request_id'] = REQUEST
+    async with Client(create_server(fake_container)) as client:
+        tools = {tool.name:tool for tool in await client.list_tools()}
+        assert 'gpu_selection' in tools[name].input_schema['properties']
+        result = await client.call_tool(name, arguments)
+        assert not result.is_error
+        assert fake_container.calls[-1][2]['gpu_selection'] == GpuSelection(mode='exact', indices=[0, 4])
+        fake_container.calls.clear()
+        arguments['gpu_selection']['effective_gres'] = 'gpu:injected:1'
+        result = await client.call_tool(name, arguments, raise_on_error=False)
+        assert result.is_error and not fake_container.calls
 
 
 def test_main_selects_only_stdio(monkeypatch):

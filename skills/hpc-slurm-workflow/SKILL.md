@@ -33,9 +33,22 @@ conflicts; urgency cannot supply missing facts.
    dependencies, batch script, working directory, resources, and actual log/output
    path logic. Call `slurm_preview(project_id, script_path)` before submission;
    parsed directives alone do not validate application output paths.
+   For a GPU workload, first call `slurm_gpu_inventory(project_id)` and resolve
+   the user's requested indices, UUIDs or single-card GRES from current evidence.
+   Use an exact selector for specified cards, or auto plus count when the user
+   permits automatic selection. Pass the same explicit selection to
+   `slurm_preview(project_id, script_path, gpu_selection)` and submission.
+   Require ready or queueable; busy or unknown is not permission to substitute
+   cards. Remove conflicting script GPU requests in the reviewed local source
+   and sync through the existing gates. Preserve CUDA_VISIBLE_DEVICES. The
+   generated script runs a GPU allocation/occupancy guard before the workload.
 5. Generate one UUID request ID and call
    `slurm_submit(project_id, script_path, request_id)`. Reuse the same UUID
    only when retrying that uncertain submission. A new UUID risks a duplicate.
+   GPU calls use `slurm_submit(project_id, script_path, request_id, gpu_selection)`.
+   Retain returned GPU identities, GRES and guard diagnostic paths. A retry
+   recovers the stored choice; do not change selection or script content under
+   the same UUID. CPU-only jobs omit gpu_selection.
 6. Execute the returned `hpc-agent` watch command unchanged from the originating
    Codex terminal within the registered local project. Preserve returned options,
    including configuration selection. Verify with
@@ -90,11 +103,29 @@ For verified success:
 For FAILED, CANCELLED, TIMEOUT, OUT_OF_MEMORY, NODE_FAIL, PREEMPTED, any other
 unsuccessful outcome, or nonzero exit: collect bounded diagnostic logs and
 available accounting/resource evidence; preserve diagnostics and explain the
-failure. Stop normal success analysis. Do not automatically change resources,
+failure. For a GPU job, also read the recorded guard diagnostic path when
+available; exit 75 means a resource conflict and exit 76 means unavailable
+evidence. Stop normal success analysis. Do not automatically change resources,
 cancel, delete, alter code, or resubmit. Deadline pressure does not establish
 a memory diagnosis or a safe resource value. An explicit request for a new run
 is separate work requiring evidence and every new-submission gate; the event
 itself never authorizes that work.
+
+## Explicitly requested cancellation
+
+When the human authorizes stopping a particular job, call the native
+`slurm_cancel_job(job_id, request_id, server_alias)` tool. The alias is optional.
+Preserve a fresh
+request UUID before the first call and reuse it for recovery. Resolve the exact
+job/server first; never replace a specified job with another job. An explicit
+existing alias is required for jobs not uniquely registered locally. The service
+verifies the authenticated remote UID owns the job, including array elements;
+there is no bulk-all, arbitrary signal, or shell interface. Do not use generic
+remote_execute/ssh_execute to dispatch scancel. `cancellation_requested` means
+accepted, not terminal: collect final accounting and logs through the normal
+query tools. On CANCELLATION_UNCERTAIN, inspect state before considering a new
+request; do not change UUIDs to blindly retry. A failed-job event alone never
+authorizes cancellation.
 
 ## Pressure traps
 

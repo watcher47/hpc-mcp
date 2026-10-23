@@ -1,0 +1,4 @@
+slurm/*.sbatch text eol=lf
+smoke.py text eol=lf
+.hpcignore text eol=lf
+logs/.gitkeep text eol=lf

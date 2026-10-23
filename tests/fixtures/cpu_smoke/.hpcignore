@@ -1,0 +1,8 @@
+*
+!smoke.py
+!slurm/
+slurm/*
+!slurm/cpu_smoke.sbatch
+!logs/
+logs/*
+!logs/.gitkeep

@@ -58,6 +58,22 @@ def _config(**updates: object) -> ClusterConfig:
     return ClusterConfig.model_validate(values)
 
 
+async def test_gpu_probe_stdin_is_sent_as_bytes(tmp_path, monkeypatch):
+    from hpc_mcp.slurm import resource_probe
+    source = Path(resource_probe.__file__).read_bytes()
+    calls = []
+    class Connection:
+        async def create_process(self, command, **options):
+            calls.append(options)
+            return FinishedProcess(b'{}')
+    @asynccontextmanager
+    async def connect(): yield Connection()
+    client = SshClient(_config(), HostTrustStore(tmp_path / 'trust.sqlite3'))
+    monkeypatch.setattr(client, '_connect', connect)
+    await client.run(RemoteCommand('python3', ['-I', '-', 'inventory'], '/project', standard_input=source))
+    assert calls == [{'encoding':None, 'input':source}]
+
+
 @pytest.mark.asyncio
 async def test_password_profile_connects_with_tofu_and_records_after_authentication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

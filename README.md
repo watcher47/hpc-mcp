@@ -6,7 +6,9 @@
 
 > 帮我安装 https://github.com/watcher47/hpc-mcp ，先阅读 AGENTS.md 和 docs/install-with-codex.md，按发布版流程执行。询问我自己的 SSH 用户名和允许使用的本地项目目录；密码只在本机遮蔽输入窗口填写。
 
-完整流程见 [Codex 安装契约](docs/install-with-codex.md)。推荐下载 [v0.1.0 官方发布资产](https://github.com/watcher47/hpc-mcp/releases/tag/v0.1.0)，验证 SHA-256，再用隔离环境安装。项目不承诺 PyPI 包可用。
+已发布稳定版为 [v0.1.0](https://github.com/watcher47/hpc-mcp/releases/tag/v0.1.0)，安装时使用[该版本的 Codex 安装契约](https://github.com/watcher47/hpc-mcp/blob/v0.1.0/docs/install-with-codex.md)，验证 SHA-256，再用隔离环境安装。项目不承诺 PyPI 包可用。
+
+当前 `main` 是包含后续修复的 `0.2.0` 源码，尚未发布对应安装资产。当前能力和[安装契约](docs/install-with-codex.md)随源码更新；源码提交不表示受管安装已升级。
 
 `10.29.114.128` 是明确的站点预设，本站用户无需重新设置 IP；其他集群可以覆盖。它不是 SSH 运行时通用默认值。必须使用你自己的 SSH 用户名，不能根据 Windows 用户或仓库作者推断。密码只保存在用户本机 `servers.json`，不进入聊天、命令参数、环境变量或日志；本配置流程不使用钥匙串。新建窗口不会覆盖已有配置。
 
@@ -14,7 +16,9 @@
 
 ## 能力与边界
 
-24 个 MCP 工具覆盖连接检查、项目映射/同步、远程文件、受限 SSH 命令、Slurm 预览/提交/查询/日志/结果与监控。凭据不出现在工具参数或返回值中。项目路径限制、命令策略、TOFU 主机信任与请求 UUID 提交防重保持生效。授权目录和策略见 [配置说明](docs/configuration.md)。
+当前源码的 26 个 MCP 工具覆盖连接检查、项目映射/同步、远程文件、受限 SSH 命令、GPU 清单与选卡、Slurm 预览/提交/取消/查询/日志/结果与监控。凭据不出现在工具参数或返回值中。项目路径限制、命令策略、TOFU 主机信任与请求 UUID 提交防重保持生效。授权目录和策略见 [配置说明](docs/configuration.md)，按明确 JobID 停止本人作业见 [取消接口](docs/slurm-cancellation.md)。
+
+可按物理 GPU index、UUID 或单卡 GRES 精确选卡，也可自动选择指定数量。启用该功能的提交会复查物理占用，并在业务启动前核验实际分配；同一 UUID 重试恢复原选择。首版要求直连计算节点、单节点 Bash 和每卡唯一 GRES，详见 [GPU 选择](docs/gpu-selection.md)。
 
 独立 `hpc-agent` 每约 45–55 秒查询作业，等待轮询不消耗模型 token；后续分析回合会消耗。它通过原生队列通知原任务，队列 ACK 不证明结果已收集。原生协议不提供全局绝对 exactly-once 保证；证据不足时保留不确定状态，详见 [队列交接](docs/native-queue-handoff.md) 与 [诊断](docs/agent-delivery-diagnostics.md)。
 
@@ -28,4 +32,6 @@ uv run pytest -m "not real_cluster" --cov=hpc_mcp --cov-report=term-missing --co
 uv build
 ```
 
-版本 `0.1.0`，许可证 [MIT](LICENSE)。见 [发布说明](docs/release-v0.1.0.md)。
+当前源码版本 `0.2.0`，许可证 [MIT](LICENSE)。见 [变更说明](docs/release-v0.2.0.md)。
+
+复用已安装服务完成最小 CPU 作业提交、监控和结果回收，见 [无人值守 CPU 流程与恢复说明](docs/cpu-smoke-workflow.md)。真实提交需要明确授权；该流程保留 UUID 和验证证据，不自动提交科研仿真。

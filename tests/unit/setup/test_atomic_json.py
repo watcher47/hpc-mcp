@@ -1,5 +1,6 @@
 import errno
 import json
+import math
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,7 +63,7 @@ def test_atomic_json_retries_only_replace_with_same_fsynced_temp(
     assert json.loads(path.read_text()) == value
     assert len(attempts) == failures + 1 and len(set(attempts)) == 1
     assert delays == DELAYS[:failures]
-    assert sum(delays) <= 0.31
+    assert math.fsum(delays) <= 0.31
     assert list(tmp_path.iterdir()) == [path]
 
 

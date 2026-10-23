@@ -19,8 +19,11 @@ from hpc_mcp.project.registry import ProjectRecord, ProjectRegistry
 from hpc_mcp.project.sync import ProjectSyncService
 from hpc_mcp.remote.files import RemoteFileService, _redact_io_errors
 from hpc_mcp.remote.patch import RemotePatchService
-from hpc_mcp.slurm.preview import preview_remote_submission
+from hpc_mcp.slurm.preview import create_submission_preview, preview_remote_submission, read_remote_script
+from hpc_mcp.slurm.gpu import GpuSelection, GpuService
+from hpc_mcp.slurm.gpu_submission import script_header
 from hpc_mcp.slurm.query import SlurmQueryService
+from hpc_mcp.slurm.cancel import CancellationStore, SlurmCancelService
 from hpc_mcp.slurm.submit import SlurmSubmitService
 from hpc_mcp.ssh.client import SshClient
 from hpc_mcp.ssh.general import GeneralSshService
@@ -129,11 +132,24 @@ class ExecutionService:
 
 
 class PreviewService:
-    def __init__(self, files: ProjectServiceRouter) -> None:
+    def __init__(self, files: ProjectServiceRouter, gpu=None) -> None:
         self._files = files
+        self._gpu = gpu
 
-    async def preview(self, project_id: str, script_path: str) -> Any:
+    async def preview(self, project_id: str, script_path: str, gpu_selection: GpuSelection | None = None) -> Any:
         try:
+            if gpu_selection is not None:
+                source = await read_remote_script(self._files, project_id, script_path)
+                script_header(source)
+                preview = create_submission_preview(script_path, source)
+                data = await self._gpu.preflight(project_id, gpu_selection)
+                plan = data['selection']
+                if plan is not None:
+                    script_header(source, plan)
+                gpu = dict(data, submittable=plan is not None and data['admission']['allowed'], guard_required=True,
+                           effective_sbatch_options=[] if plan is None else ['--nodelist='+plan['node'], '--nodes=1', '--gres='+plan['gres']],
+                           warnings=['Selected GPUs are currently allocated; this request may queue.'] if data['status'] == 'queueable' else [])
+                return replace(preview, gpu=gpu)
             return await preview_remote_submission(self._files, project_id, script_path)
         except ValueError:
             raise HpcMcpError("SLURM_SCRIPT_INVALID", "Slurm script is invalid") from None
@@ -147,15 +163,22 @@ class SubmissionService:
         self._registry, self._ssh, self._files, self._preview = registry, ssh, files, preview
         self._config_file = config_file
 
-    async def submit(self, project_id: str, script_path: str, request_id: UUID) -> Any:
+    async def submit(self, project_id: str, script_path: str, request_id: UUID, gpu_selection: GpuSelection | None = None) -> Any:
         record = _project(self._registry, project_id)
-        preview = await self._preview.preview(project_id, script_path)
         service = SlurmSubmitService(self._registry, self._ssh(record.server_alias), self._files)
         try:
-            receipt = await service.submit(project_id, script_path, request_id)
+            if gpu_selection is None:
+                preview = await self._preview.preview(project_id, script_path)
+                receipt = await service.submit(project_id, script_path, request_id)
+            else:
+                receipt = await service.submit(project_id, script_path, request_id, gpu_selection=gpu_selection)
         except ValueError:
             raise HpcMcpError("SLURM_SCRIPT_INVALID", "Slurm script is invalid") from None
-        stdout, stderr = _registered_log_paths(preview, receipt.job_id)
+        if receipt.version == 2:
+            stdout = _log_path(receipt.stdout_template, receipt.job_id)
+            stderr = _log_path(receipt.stderr_template, receipt.job_id) if receipt.stderr_template else stdout
+        else:
+            stdout, stderr = _registered_log_paths(preview, receipt.job_id)
         try:
             self._registry.register_job(project_id, receipt.job_id, stdout, stderr)
         except (HpcMcpError, sqlite3.Error):
@@ -204,9 +227,11 @@ class ServiceContainer:
     slurm_preview: PreviewService
     slurm_submit: SubmissionService
     slurm_query: SlurmQueryService
+    slurm_cancel: SlurmCancelService
     general_ssh: GeneralSshService
     agent_store: AgentStore
     slurm_watch: WatchService
+    slurm_gpu: ProjectServiceRouter
 
 
 def build_container(
@@ -229,13 +254,16 @@ def build_container(
     files = ProjectServiceRouter(registry, ssh, RemoteFileService,
                                  {"list", "stat", "read", "search", "upload", "download"})
     patch = ProjectServiceRouter(registry, ssh, RemotePatchService, {"apply"})
-    preview = PreviewService(files)
+    gpu = ProjectServiceRouter(registry, ssh, GpuService, {'inventory', 'preflight'})
+    preview = PreviewService(files, gpu)
     return ServiceContainer(
         configs=configs, registry=registry, ssh=ssh, project_sync=sync,
         connection=ConnectionService(ssh), projects=ProjectService(configs, registry, ssh, sync),
         remote_files=files, remote_patch=patch, execution=ExecutionService(registry, ssh),
         slurm_preview=preview, slurm_submit=SubmissionService(registry, ssh, files, preview, servers_file),
         slurm_query=SlurmQueryService(registry, ssh, username=lambda alias: configs.load_cluster(alias).username),
+        slurm_cancel=SlurmCancelService(registry, ssh, CancellationStore(paths.data_directory / "cancellations.sqlite3")),
         general_ssh=GeneralSshService(configs, ssh),
         agent_store=agent_store, slurm_watch=WatchService(registry, agent_store),
+        slurm_gpu=gpu,
     )

@@ -3,6 +3,25 @@ import pytest
 from hpc_mcp.slurm.parser import parse_sbatch_directives, parse_squeue_rows
 
 
+def test_counts_all_typed_gpu_entries():
+    result = parse_sbatch_directives('#SBATCH --gres=gpu:card_a:1,gpu:card_b:2')
+    assert result.gpus == 3
+    assert result.gpu_gres == {'card_a': 1, 'card_b': 2}
+
+
+@pytest.mark.parametrize('value', ['', 'gpu:card_a:1,gpu:card_b:0', 'gpu:bad:-1', 'gpu:bad:x', 'gpu:a:b:1', 'gpu'])
+def test_malformed_gpu_request_fails_preview(value):
+    from hpc_mcp.slurm.preview import create_submission_preview
+    with pytest.raises(ValueError, match='gpu'):
+        create_submission_preview('job.sbatch', '#!/bin/bash\n#SBATCH --gres='+value+'\necho ok\n')
+
+
+def test_missing_gres_value_fails_preview():
+    from hpc_mcp.slurm.preview import create_submission_preview
+    with pytest.raises(ValueError, match='gpu'):
+        create_submission_preview('job.sbatch', '#!/bin/bash\n#SBATCH --gres\necho ok\n')
+
+
 def test_parse_sbatch_directives() -> None:
     script = """#!/bin/bash
 #SBATCH --job-name=demo

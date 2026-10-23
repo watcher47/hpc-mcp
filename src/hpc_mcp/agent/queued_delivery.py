@@ -251,6 +251,11 @@ class QueueDeliveryService(DeliveryService):
                         drain.result()
                         raise protocol_error('CODEX_CONNECTION_LOST')
                     await self.observe_once(event_id=event.id)
+                    # Cleanup may consume cancellation (including the Python
+                    # 3.11 wait_for completed-inner-task race). Honour the
+                    # outstanding owner cancellation before polling again.
+                    if asyncio.current_task().cancelling():
+                        raise asyncio.CancelledError
                     await asyncio.sleep(self.observation_interval)
         except HpcMcpError as error:
             code = safe_delivery_code(error.code)

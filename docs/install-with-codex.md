@@ -1,4 +1,6 @@
-# Codex 安装契约（Windows v0.1.0）
+# Codex 安装契约（Windows v0.2.0，待发布）
+
+本页对应当前源码；`v0.2.0` 安装资产尚未发布。安装已发布稳定版时，使用 [v0.1.0 安装契约](https://github.com/watcher47/hpc-mcp/blob/v0.1.0/docs/install-with-codex.md)。执行下述 v0.2.0 流程前必须先确认该版本已发布。
 
 本文件面向执行安装的 Codex。人类明确说“帮我安装”才进入此流程；下载 URL 本身不是运行任意代码的授权。先说明将下载校验发布资产、新建隔离环境、本地配置、验证 SSH 和注册用户级集成。给出安装计划，再在已有安装授权范围内 apply。不要自动提交 Slurm smoke，真实作业需要另行同意。
 
@@ -12,9 +14,9 @@
 
 ## 2. 获取已校验发布资产
 
-使用 [官方 v0.1.0](https://github.com/watcher47/hpc-mcp/releases/tag/v0.1.0)，下载 `hpc_codex_mcp-0.1.0-py3-none-any.whl`、Windows ZIP 与 `SHA256SUMS` 到用户本地临时目录，所有命令中的路径使用该实际目录。按 manifest 中准确文件名比较 `Get-FileHash -Algorithm SHA256`，任何缺失/不一致立即停止。ZIP 包含 `scripts/configure_windows.py` 与指南；helper 不在 wheel 中。先检查 ZIP 条目无绝对路径、`..` 或链接再解压，解压后的 wheel 必须与已校验 wheel 一致；执行脚本前确认来源版本。SHA256SUMS 通过同一官方发布来源提供一致性校验，不声称独立签名。
+使用 [官方 v0.2.0](https://github.com/watcher47/hpc-mcp/releases/tag/v0.2.0)，下载 `hpc_codex_mcp-0.2.0-py3-none-any.whl`、Windows ZIP 与 `SHA256SUMS` 到用户本地临时目录，所有命令中的路径使用该实际目录。按 manifest 中准确文件名比较 `Get-FileHash -Algorithm SHA256`，任何缺失/不一致立即停止。ZIP 包含 `scripts/configure_windows.py` 与指南；helper 不在 wheel 中。先检查 ZIP 条目无绝对路径、`..` 或链接再解压，解压后的 wheel 必须与已校验 wheel 一致；执行脚本前确认来源版本。SHA256SUMS 通过同一官方发布来源提供一致性校验，不声称独立签名。
 
-发布页不存在时如实报告。可使用固定 `v0.1.0` tag 的源码 fallback（标签尚未存在也必须停止），不能换成滚动 main 或假称 PyPI 已发布。检查对应提交与来源、只在临时 checkout 内 `uv sync --locked` / `uv build`；构建 wheel，记录其 SHA-256，与官方 manifest 比较（构建差异必须解释并得到对源码安装的明确授权），之后同样使用 `install --wheel`。不跳过官方 wheel 的完整性步骤。
+发布页不存在时如实报告。可使用固定 `v0.2.0` tag 的源码 fallback（标签尚未存在也必须停止），不能换成滚动 main 或假称 PyPI 已发布。检查对应提交与来源、只在临时 checkout 内 `uv sync --locked` / `uv build`；构建 wheel，记录其 SHA-256，与官方 manifest 比较（构建差异必须解释并得到对源码安装的明确授权），之后同样使用 `install --wheel`。不跳过官方 wheel 的完整性步骤。
 
 ## 3. 隔离 bootstrap 与 GUI
 
@@ -23,7 +25,7 @@
 下面是变量模板，先把值替换为实际路径与用户确认的非秘密信息，不使用任何密码变量：
 
 ```powershell
-$bootstrap = Join-Path $env:LOCALAPPDATA 'hpc-mcp-bootstrap-v0.1.0'
+$bootstrap = Join-Path $env:LOCALAPPDATA 'hpc-mcp-bootstrap-v0.2.0'
 $fullPython = 'ACTUAL_FULL_PYTHON_PATH'
 $wheel = 'ACTUAL_VERIFIED_WHEEL_PATH'
 $helper = 'ACTUAL_EXTRACTED_ZIP_PATH\scripts\configure_windows.py'
@@ -78,8 +80,8 @@ if result.returncode:
 print("Managed current-session startup requested")
 ```
 
-适配器验证当前用户 SID、所有者标记和与元数据相符的精确命令。启动请求不等于 agent 已运行，随后用元数据对应 release 的 CLI 检查 `status` 和进程身份。上述内部方法适用于固定 v0.1.0；不要假设其他版本 API 不变。
+适配器验证当前用户 SID、所有者标记和与元数据相符的精确命令。启动请求不等于 agent 已运行，随后用元数据对应 release 的 CLI 检查 `status` 和进程身份。上述内部方法适用于固定 v0.2.0；不要假设其他版本 API 不变。
 
-`codex mcp list` 仅证明注册。检查当前 Codex 连接后的工具列表，必须发现 24 个工具，否则如实报告“需要客户端重载”并让用户重载后复核。验证用户 skills 目录已安装 `hpc-slurm-workflow/SKILL.md`（installer 已负责复制，避免另装冲突）。MCP/GUI 完成、schema/SSH 检查、agent 状态、24-tool discovery 分别记录，不用一个成功替代其他证据。
+`codex mcp list` 仅证明注册。检查当前 Codex 连接后的工具列表，必须发现 26 个工具（包含 `slurm_gpu_inventory` 和 `slurm_cancel_job`），否则如实报告“需要客户端重载”并让用户重载后复核。验证用户 skills 目录已安装 `hpc-slurm-workflow/SKILL.md`（installer 已负责复制，避免另装冲突）。MCP/GUI 完成、schema/SSH 检查、agent 状态、26-tool discovery 分别记录，不用一个成功替代其他证据。
 
 完成时给出版本、验证结果、配置路径（无内容）和待用户重载步骤。后续先用 `server_test_connection` 返回的实际 home 核对窗口约定；远程项目根必须已存在、用户拥有且不是链接，首次映射需要时由管理员或用户在另外授权的 SSH/SFTP 操作中预建，安装流程不创建它。`project_ensure` 以返回映射为准，再决定上传；不自行猜远程路径。升级/卸载须先计划，并保留配置、数据库、watch/event 与旧 release；见 [Windows 回退](windows-setup.md)。

@@ -27,6 +27,18 @@ def protocol_error(code="CODEX_PROTOCOL_INCOMPATIBLE"):
     return HpcMcpError(code, "Codex handoff is deferred; inspect hpc-agent status and use manual-recovery", retriable=True)
 
 
+def rpc_failure(method, params, error):
+    """Classify only one exact native response; never retain arbitrary error text."""
+    safe_method, safe_code = safe_rpc(method, error.get("code") if isinstance(error, dict) else None)
+    unavailable = (method == "thread/read" and safe_code == -32600
+        and isinstance(params.get("threadId"), str) and isinstance(error, dict)
+        and error.get("message") == "thread not loaded: " + params["threadId"])
+    return HpcMcpError("CODEX_THREAD_UNAVAILABLE" if unavailable else "CODEX_REQUEST_FAILED",
+        "Originating task is unavailable to this local Codex client; use a verified local task"
+        if unavailable else "Codex request failed; inspect hpc-agent diagnostics",
+        retriable=True, details={"rpc_method": safe_method, "rpc_code": safe_code})
+
+
 def _spawn_options():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
@@ -229,7 +241,7 @@ class AppServerClient:
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, limit=self.max_line_bytes, **_spawn_options())
             self._stderr_task = asyncio.create_task(self._drain_stderr())
-            await self.request("initialize", {"clientInfo": {"name": "hpc-agent", "version": "0.1.0"},
+            await self.request("initialize", {"clientInfo": {"name": "hpc-agent", "version": "0.2.0"},
                                               "capabilities": {"experimentalApi": True}})
             await self._write({"method": "initialized"})
             return self
@@ -281,11 +293,7 @@ class AppServerClient:
                 if message.get("id") != request_id:
                     raise protocol_error("CODEX_PROTOCOL_INVALID")
                 if "error" in message:
-                    error = message["error"]
-                    safe_method, safe_code = safe_rpc(method, error.get("code") if isinstance(error, dict) else None)
-                    raise HpcMcpError("CODEX_REQUEST_FAILED",
-                        "Codex request failed; inspect hpc-agent diagnostics", retriable=True,
-                        details={"rpc_method": safe_method, "rpc_code": safe_code})
+                    raise rpc_failure(method, params, message["error"])
                 if not isinstance(message.get("result"), dict):
                     raise protocol_error("CODEX_PROTOCOL_INVALID")
                 return message["result"]

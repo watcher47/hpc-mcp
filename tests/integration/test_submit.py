@@ -132,6 +132,55 @@ async def test_repeated_request_id_returns_same_job_without_second_sbatch(servic
     assert not command.environment
 
 
+@pytest.mark.parametrize('disconnect', [None, 'before', 'after'])
+async def test_selected_gpu_service_deploys_and_recovers_one_job(service, monkeypatch, disconnect):
+    from hpc_mcp.slurm import submit_once as helper
+    from hpc_mcp.slurm.gpu import GpuSelection
+    submit_service, remote = service
+    remote.disconnect = disconnect
+    probes = []
+    plan = {'node':'node1', 'gres':'gpu:card_a:1', 'gpus':[
+        {'index':4, 'uuid':'GPU-a', 'minor':2, 'gres_type':'card_a'}]}
+    original_localize = remote.localize_args
+    def localize(args):
+        args = original_localize(args)
+        for flag in ('--gpu-probe', '--gpu-helper'):
+            index = args.index(flag) + 1
+            args[index] = str(remote.transport._local(args[index]))
+        return args
+    monkeypatch.setattr(remote, 'localize_args', localize)
+    original_load = helper._load_verified
+    def load(root, path, digest):
+        module = original_load(root, path, digest)
+        if Path(path).name.startswith('resource_probe.'):
+            module.collect_snapshot = lambda: {'sampled_at':'now'}
+            def evaluate(snapshot, selection):
+                probes.append(selection)
+                return {'status':'ready', 'admission':{'allowed':True}, 'selection':plan}
+            module.evaluate_snapshot = evaluate
+        return module
+    monkeypatch.setattr(helper, '_load_verified', load)
+    monkeypatch.setattr(helper, '_GPU_RULES', None)
+    selection = GpuSelection(mode='exact', indices=[4])
+    first = await submit_service.submit('project-1', 'slurm/run.slurm', RID, selection)
+    uploads = remote.transport.uploads
+    second = await submit_service.submit('project-1', 'slurm/run.slurm', RID, selection)
+    assert first == second and first.gpu_plan == plan
+    assert first.stdout_template == 'slurm-%j.out'
+    assert remote.sbatch_calls == len(probes) == 1
+    assert remote.transport.uploads == uploads == 3
+    assert (remote.root / first.submission_script).is_file()
+    assert (remote.root / first.expected_plan).is_file()
+    with pytest.raises(HpcMcpError) as conflict:
+        await submit_service.submit('project-1', 'slurm/run.slurm', RID)
+    assert conflict.value.code == 'SUBMISSION_CONFLICT'
+    (remote.root / 'slurm/run.slurm').write_text('#!/bin/sh\necho changed\n')
+    with pytest.raises(HpcMcpError) as conflict:
+        await submit_service.submit('project-1', 'slurm/run.slurm', RID, selection)
+    assert conflict.value.code == 'SUBMISSION_CONFLICT'
+    assert remote.sbatch_calls == len(probes) == 1
+
+
 @pytest.mark.parametrize('when,run_count', [('before', 2), ('after', 1)])
 async def test_disconnect_recovers_receipt_before_retry(service, when, run_count):
     submit_service, remote = service

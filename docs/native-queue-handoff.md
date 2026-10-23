@@ -1,5 +1,48 @@
 # Native queue completion handoff
 
+## Originating task accessibility and never-sent recovery
+
+`hpc-agent watch` first performs a bounded read-only native `thread/read` with
+`includeTurns: false`, using the real terminal thread/session IDs. Exact task,
+session and cwd ancestry must match before the watch is persisted. A durable
+task delegated to a Windows executor is not thereby a local native task. The
+exact native `-32600 / thread not loaded: <requested ID>` response is classified
+as `CODEX_THREAD_UNAVAILABLE`; arbitrary error text is neither exposed nor kept.
+The service does not guess a different thread or bypass authentication.
+
+For a previously misbound completion that has never had a send, an explicitly
+authorized `hpc-agent recover-watch --server ... --job-id ... --project-id ...
+--event-id ... --from-thread ...` may be run in the intended actual local task's
+terminal, inside the registered project. It uses that terminal's verified native
+context; there are no target thread/session flags. One SQLite transaction requires
+the exact old thread, one inactive watch and one PENDING terminal event, no lease,
+no legacy send fence and no queue receipt of any state. It records the old/new
+destination in `watch_context_recoveries`, changes only the watch destination and
+makes the same event due. JobID, event UUID, attempts and all diagnostic/send
+evidence are retained. An identical retry reads the existing audit without
+resetting or replaying anything. Any accepted/uncertain send, receipt, lease,
+different recovery or ambiguous event refuses the operation. `diagnostics`
+exposes the bounded audit. This command never submits or cancels a Slurm job.
+
+Automatic delivery still must prove the exact input and that input's own final
+turn accounting and result processing; registration or queue ACK alone is not
+acceptance.
+
+## Foreground profiles and background configuration
+
+If the foreground MCP can use an alias but the background agent reports
+`CONFIG_NOT_FOUND`, inspect the effective configuration path in both execution
+contexts. Packaged Windows apps can resolve a logical AppData path to an MSIX
+LocalCache file. Keep configuration contents private. Reapply the verified wheel
+through the managed installer with the effective path so registration, startup
+and installation metadata agree; preserve current watches and send fences.
+
+Startup ownership still requires the exact user SID, managed marker, action,
+trigger and privilege checks. Native command output must retain localized account
+names even when Python uses UTF-8 mode. See [Windows setup](windows-setup.md)
+for managed installation and rollback, and [GPU selection](gpu-selection.md)
+for the submission and allocation guards.
+
 The agent admits a completion event through `thread/queue/add` once, using its
 existing event UUID as `clientUserMessageId`. It records the version, message and
 registered-context digests, and a durable send fence before the request. An ACK

@@ -20,6 +20,7 @@ class SlurmResources:
     entry_command: str | None = None
     extra_directives: dict[str, str | None] = field(default_factory=dict)
     raw_numeric_requests: dict[str, str] = field(default_factory=dict)
+    gpu_gres: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,3 +44,4 @@ class SubmissionPreview:
     entry_command: str | None
     warnings: list[str] = field(default_factory=list)
     executable: bool = False
+    gpu: dict | None = None

@@ -16,6 +16,7 @@ from typing import Annotated
 import typer
 
 from hpc_mcp.agent.monitor import Monitor
+from hpc_mcp.agent.service import verify_local_context
 from hpc_mcp.agent.delivery import manual_recovery
 from hpc_mcp.agent.queued_delivery import QueueDeliveryService as DeliveryService
 from hpc_mcp.agent.queue_store import QueueStore
@@ -54,8 +55,24 @@ def watch(context: typer.Context, server: Annotated[str, typer.Option("--server"
           project_id: Annotated[str, typer.Option("--project-id")]) -> None:
     """Bind an already submitted job to this Codex terminal's context."""
     with _errors():
-        record = context.obj.slurm_watch.register(server, job_id, project_id)
+        native = asyncio.run(verify_local_context())
+        record = context.obj.slurm_watch.register(server, job_id, project_id,
+            environ={"CODEX_THREAD_ID": native["thread_id"], "CODEX_SESSION_ID": native["session_id"]},
+            cwd=Path(native["cwd"]))
         typer.echo(json.dumps(asdict(record)))
+
+
+@app.command("recover-watch")
+def recover_watch(context: typer.Context, server: Annotated[str, typer.Option("--server")],
+                  job_id: Annotated[str, typer.Option("--job-id")],
+                  project_id: Annotated[str, typer.Option("--project-id")],
+                  event_id: Annotated[str, typer.Option("--event-id")],
+                  from_thread: Annotated[str, typer.Option("--from-thread")]) -> None:
+    """Audit a never-sent completion's move to this verified local terminal; never replay sends."""
+    with _errors():
+        native = asyncio.run(verify_local_context())
+        record = context.obj.slurm_watch.recover(server, job_id, project_id, event_id, from_thread, context=native)
+        typer.echo(json.dumps({"watch": asdict(record), "recovery": context.obj.agent_store.context_recovery(event_id)}))
 
 
 @app.command()
@@ -88,7 +105,7 @@ def diagnostics(context: typer.Context, event_id: Annotated[str, typer.Option("-
     with _errors():
         store = context.obj.agent_store
         typer.echo(json.dumps(store.diagnostics(event_id, limit=limit) | {
-            "queue": _queue_summary(store, event_id)}))
+            "queue": _queue_summary(store, event_id), "context_recovery": store.context_recovery(event_id)}))
 
 
 @app.command("retry-server")

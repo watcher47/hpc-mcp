@@ -162,6 +162,11 @@ class AgentStore:
             db.execute("""CREATE TABLE IF NOT EXISTS queue_reproof_origins (
                 event_id TEXT PRIMARY KEY REFERENCES queue_handoffs(event_id),
                 origin_error TEXT NOT NULL, created_at REAL NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS watch_context_recoveries (
+                event_id TEXT PRIMARY KEY REFERENCES terminal_events(id), watch_id TEXT NOT NULL,
+                previous_thread_id TEXT NOT NULL, previous_session_id TEXT NOT NULL,
+                previous_cwd TEXT NOT NULL, thread_id TEXT NOT NULL, session_id TEXT NOT NULL,
+                cwd TEXT NOT NULL, recovered_at REAL NOT NULL)""")
 
     @contextmanager
     def _connect(self):
@@ -202,6 +207,44 @@ class AgentStore:
             rows = db.execute("SELECT * FROM job_watches" + (" WHERE active=1" if active else "")
                               + " ORDER BY server_alias,job_id").fetchall()
         return [JobWatch(**dict(row)) for row in rows]
+
+    def context_recovery(self, event_id):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM watch_context_recoveries WHERE event_id=?", (event_id,)).fetchone()
+        return dict(row) if row else None
+
+    def recover_watch_context(self, *, watch_id, event_id, expected_thread_id,
+                              thread_id, session_id, cwd, now):
+        """Change a destination once, only before any possible send; retain all evidence."""
+        _finite_times(now)
+        values = (expected_thread_id, thread_id, session_id, cwd)
+        if any(not isinstance(v, str) or not v.strip() or any(c in v for c in "\r\n\x00") for v in values):
+            raise HpcMcpError("WATCH_RECOVERY_BLOCKED", "Recovery context is invalid")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            watch = db.execute("SELECT * FROM job_watches WHERE id=?", (watch_id,)).fetchone()
+            event = db.execute("SELECT * FROM terminal_events WHERE id=? AND watch_id=?", (event_id, watch_id)).fetchone()
+            audit = db.execute("SELECT * FROM watch_context_recoveries WHERE event_id=?", (event_id,)).fetchone()
+            target = (thread_id, session_id, cwd)
+            if audit is not None:
+                if (watch is not None and audit["previous_thread_id"] == expected_thread_id
+                        and tuple(audit[k] for k in ("thread_id", "session_id", "cwd")) == target
+                        and tuple(watch[k] for k in ("thread_id", "session_id", "cwd")) == target):
+                    return JobWatch(**dict(watch))  # Idempotent read, never a replay.
+                raise HpcMcpError("WATCH_RECOVERY_BLOCKED", "This event already has a different recovery")
+            receipt = db.execute("SELECT 1 FROM queue_handoffs WHERE event_id=?", (event_id,)).fetchone()
+            others = db.execute("SELECT 1 FROM terminal_events WHERE watch_id=? AND id<>?", (watch_id, event_id)).fetchone()
+            if (watch is None or event is None or watch["thread_id"] != expected_thread_id
+                    or watch["active"] or event["delivery_state"] != "PENDING"
+                    or event["send_started_at"] is not None or event["lease_owner"] is not None
+                    or event["lease_until"] is not None or receipt is not None or others is not None):
+                raise HpcMcpError("WATCH_RECOVERY_BLOCKED", "Event is not a unique never-sent unleased pending completion")
+            db.execute("INSERT INTO watch_context_recoveries VALUES (?,?,?,?,?,?,?,?,?)",
+                (event_id, watch_id, watch["thread_id"], watch["session_id"], watch["cwd"], *target, now))
+            db.execute("UPDATE job_watches SET thread_id=?,session_id=?,cwd=? WHERE id=?", (*target, watch_id))
+            db.execute("UPDATE terminal_events SET next_retry_at=0 WHERE id=?", (event_id,))
+            row = db.execute("SELECT * FROM job_watches WHERE id=?", (watch_id,)).fetchone()
+        return JobWatch(**dict(row))
 
     def get_watch(self, watch_id: str) -> JobWatch | None:
         with self._connect() as db:

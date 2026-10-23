@@ -1,7 +1,7 @@
 import re
 import shlex
 from collections.abc import Mapping, Sequence
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -22,6 +22,7 @@ class RemoteCommand(BaseModel):
     origin: Literal["service", "user"] = Field(
         default="service", exclude=True, repr=False
     )
+    standard_input: bytes | None = Field(default=None, exclude=True, repr=False)
 
     def __init__(
         self,
@@ -89,6 +90,20 @@ class CommandPolicy:
     _interpreter_evaluation_flags = frozenset({"-c", "-m", "--command", "--module"})
 
     def validate(self, command: RemoteCommand) -> RemoteCommand:
+        if command.standard_input is not None:
+            from hpc_mcp.slurm import cancel_once, resource_probe
+            args = command.args
+            probe_args = args == ('-I', '-', 'inventory') or (len(args) == 5 and args[:4] == ('-I', '-', 'preflight', '--selection-json') and len(args[4]) <= 16384)
+            cancel_args = len(args) == 7 and args[:4] == ('-I', '-', 'cancel', '--job-id') and args[5] == '--request-id'
+            if cancel_args:
+                try:
+                    cancel_once.validate_target(args[4], args[6])
+                except (ValueError, TypeError, AttributeError):
+                    cancel_args = False
+            packaged = ((probe_args and command.standard_input == Path(resource_probe.__file__).read_bytes())
+                        or (cancel_args and command.standard_input == Path(cancel_once.__file__).read_bytes()))
+            if command.origin != 'service' or command.program != 'python3' or command.environment or not packaged:
+                raise HpcMcpError('COMMAND_BLOCKED', 'Remote standard input is reserved for exact packaged service helpers')
         if any(
             self._environment_key.fullmatch(key) is None
             or key in self._blocked_environment
@@ -123,7 +138,7 @@ class GeneralCommandPolicy:
     """
 
     _blocked_programs = frozenset({
-        # Scheduler mutation belongs to the preview / submission services.
+        # Scheduler mutation belongs to dedicated submission / cancellation services.
         "sbatch", "srun", "salloc", "scancel", "scontrol", "sacctmgr",
         # Shells and programs which dispatch another executable.
         "sh", "bash", "dash", "zsh", "fish", "csh", "tcsh", "ksh",

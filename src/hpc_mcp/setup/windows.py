@@ -65,7 +65,8 @@ def run_command(args, **kwargs):
             try:
                 return value.decode("utf-8-sig")
             except UnicodeError:
-                return value.decode(locale.getpreferredencoding(False), errors="replace")
+                # Native utilities retain the system code page in Python UTF-8 mode.
+                return value.decode(locale.getencoding(), errors="replace")
         return subprocess.CompletedProcess(args, result.returncode, decode(result.stdout), decode(result.stderr))
     except (OSError, subprocess.SubprocessError):
         raise HpcMcpError("SETUP_COMMAND_FAILED", "A required setup command failed") from None

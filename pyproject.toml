@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hpc-codex-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local SSH and Slurm MCP for Codex"
 readme = "README.md"
 license = "MIT"
@@ -38,11 +38,17 @@ Repository = "https://github.com/watcher47/hpc-mcp"
 Issues = "https://github.com/watcher47/hpc-mcp/issues"
 
 [tool.hatch.build.targets.sdist]
+exclude = [
+  "docs/archive/**", "docs/acceptance/**", ".superpowers/**",
+  "tests/fixtures/cpu_smoke/collected/**", "tests/fixtures/cpu_smoke/output/**",
+]
 include = [
-  "src", "scripts/configure_windows.py", "skills", "tests", "README.md", "AGENTS.md",
+  "src", "scripts/configure_windows.py", "scripts/cpu_smoke_workflow.py", "scripts/cancel_job.py",
+  "scripts/Invoke-CpuSmokeWorkflow.ps1", "skills", "tests", "README.md", "AGENTS.md",
   "LICENSE", "pyproject.toml", "uv.lock", ".gitignore",
-  "docs/install-with-codex.md", "docs/configuration.md", "docs/release-v0.1.0.md",
-  "docs/windows-setup.md", "docs/native-queue-handoff.md", "docs/agent-delivery-diagnostics.md",
+  "docs/install-with-codex.md", "docs/configuration.md", "docs/cpu-smoke-workflow.md", "docs/release-v0.1.0.md",
+  "docs/gpu-selection.md", "docs/release-v0.2.0.md",
+  "docs/windows-setup.md", "docs/native-queue-handoff.md", "docs/agent-delivery-diagnostics.md", "docs/slurm-cancellation.md",
 ]
 
 [tool.hatch.build.targets.wheel]

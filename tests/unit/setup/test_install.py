@@ -76,6 +76,39 @@ def test_install_dry_run_is_read_only_and_apply_is_idempotent(tmp_path, monkeypa
     assert "fixture-value" not in json.dumps(result)
 
 
+def test_same_release_reconfiguration_persists_canonical_config_everywhere(tmp_path, monkeypatch):
+    from hpc_mcp.setup.install import Installer
+
+    instance, registration, startup = service(tmp_path, monkeypatch)
+    instance.install(apply=True, wheel=tmp_path / "same.whl")
+    previous = json.loads(instance.metadata.read_text())
+    original_config = instance.config.read_bytes()
+    database = instance.state / "agent.sqlite3"
+    database.write_bytes(b"existing watches and delivery receipts")
+    canonical = tmp_path / "msix-cache" / "servers.json"
+    canonical.parent.mkdir()
+    canonical.write_bytes(original_config)
+    replacement = Installer(canonical, instance.state, instance.skills,
+                            registration=registration, startup=startup)
+    monkeypatch.setattr(replacement, "preflight", lambda: {"ready": True})
+    monkeypatch.setattr(replacement, "prepare_release", instance.prepare_release)
+
+    replacement.install(apply=True, wheel=tmp_path / "same.whl")
+
+    current = json.loads(replacement.metadata.read_text())
+    assert current["release"] == previous["release"]
+    assert current["config"] == str(canonical.resolve())
+    assert registration.value == current["managed_command"]
+    assert registration.value[-1] == str(canonical.resolve())
+    assert startup.value == current["agent_command"]
+    assert startup.value[-2] == str(canonical.resolve())
+    assert current["previous"]["record"] == previous
+    assert database.read_bytes() == b"existing watches and delivery receipts"
+    assert canonical.read_bytes() == original_config == instance.config.read_bytes()
+    replacement.install(apply=True, wheel=tmp_path / "same.whl")
+    assert len(registration.calls) == 2
+
+
 def test_uninstall_preserves_data(tmp_path, monkeypatch):
     instance, registration, startup = service(tmp_path, monkeypatch)
     instance.state.mkdir()

@@ -70,7 +70,8 @@ def test_documented_tool_calls_match_registered_contracts():
     for source in (ROOT / "src/hpc_mcp/tools").glob("*.py"):
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
             if isinstance(node, ast.AsyncFunctionDef) and any(
-                isinstance(decorator, ast.Attribute) and decorator.attr == "tool"
+                isinstance(decorator.func if isinstance(decorator, ast.Call) else decorator, ast.Attribute)
+                and (decorator.func if isinstance(decorator, ast.Call) else decorator).attr == "tool"
                 for decorator in node.decorator_list
             ):
                 parameters = [arg.arg for arg in node.args.args]
@@ -126,12 +127,16 @@ def test_sdist_excludes_private_docs_and_includes_public_helper(tmp_path):
     for name in ("pyproject.toml", "uv.lock", "README.md", "AGENTS.md", "LICENSE", ".gitignore"):
         shutil.copyfile(ROOT / name, checkout / name)
     private = checkout / "docs/archive/private-provenance.md"
-    private.parent.mkdir(parents=True)
+    private.parent.mkdir(parents=True, exist_ok=True)
     private.write_text("synthetic private provenance must not ship")
     result = subprocess.run([shutil.which("uv"), "build", "--offline", "--sdist", "--out-dir", str(tmp_path / "dist"), str(checkout)], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     with tarfile.open(next((tmp_path / "dist").glob("*.tar.gz"))) as archive:
         names = archive.getnames()
     assert any(name.endswith("/scripts/configure_windows.py") for name in names)
+    assert any(name.endswith("/scripts/cpu_smoke_workflow.py") for name in names)
+    assert any(name.endswith("/scripts/Invoke-CpuSmokeWorkflow.ps1") for name in names)
+    assert any(name.endswith("/docs/cpu-smoke-workflow.md") for name in names)
     assert any(name.endswith("/docs/install-with-codex.md") for name in names)
     assert not any("/docs/archive/" in name for name in names)
+    assert not any("/docs/acceptance/" in name for name in names)

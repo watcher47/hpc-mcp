@@ -888,6 +888,47 @@ async def test_persistent_overlap_becomes_manual_conflict(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_owner_exits_when_observer_cleanup_consumes_cancellation(tmp_path, monkeypatch):
+    store, _, event = setup_event(tmp_path)
+    native, now = Native('notLoaded'), [100]
+    svc = service(store, native, now, ownership_timeout=1, observation_interval=.01)
+    close = svc._close_manager
+    consumed = False
+
+    async def cancel_during_close(manager):
+        nonlocal consumed
+        task = asyncio.current_task()
+        if task in svc._owned_sessions and not consumed:
+            consumed = True
+            # Reproduce the cleanup boundary losing an outer cancellation,
+            # including Python 3.11 wait_for's completed-inner-task race.
+            task.cancel()
+            try:
+                await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                pass
+        return await close(manager)
+
+    monkeypatch.setattr(svc, '_close_manager', cancel_during_close)
+    try:
+        await svc.deliver_once()
+        now[0] = 151
+        await svc.observe_once()
+        owner = next(token for token in svc._owned_sessions if isinstance(token, asyncio.Task))
+        done, _ = await asyncio.wait({owner}, timeout=.2)
+        assert consumed
+        assert owner in done, 'Consumed cancellation must not leave the supervisor polling'
+        await svc.wait_idle()
+        assert not svc._owned_sessions
+        assert native.opened == native.closed
+        assert sum(method == 'thread/resume' for method, _ in native.calls) == 1
+        assert store.events()[0].delivered_at is None
+        assert QueueStore(store).get(event.id).last_error == 'CODEX_SESSION_INTERRUPTED'
+    finally:
+        await svc.aclose()
+
+
+@pytest.mark.asyncio
 async def test_owned_bounded_failure_is_unresolved_with_safe_diagnostic(tmp_path, caplog):
     store, _, event = setup_event(tmp_path)
     native, now = Native('notLoaded'), [100]

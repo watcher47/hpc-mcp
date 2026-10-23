@@ -160,3 +160,21 @@ def test_remote_command_serializes_immutable_environment() -> None:
     assert json.loads(command.model_dump_json())["environment"] == {
         "SAFE_VALUE": "value"
     }
+
+
+def test_only_exact_packaged_owner_checked_cancellation_is_allowed():
+    from pathlib import Path
+    from hpc_mcp.slurm import cancel_once
+    source = Path(cancel_once.__file__).read_bytes()
+    args = ["-I", "-", "cancel", "--job-id", "123", "--request-id", "00000000-0000-4000-8000-000000000001"]
+    command = RemoteCommand("python3", args, "/home/alice", standard_input=source)
+    assert CommandPolicy().validate(command) == command
+    for changes in [
+        {"standard_input": source + b"\nprint('injected')"},
+        {"origin": "user"}, {"args": tuple(args + ["--all"])},
+        {"args": tuple(args[:4] + ["123,124"] + args[5:])},
+        {"environment": {"PATH": "/tmp/untrusted"}},
+    ]:
+        with pytest.raises(HpcMcpError) as caught:
+            CommandPolicy().validate(command.model_copy(update=changes))
+        assert caught.value.code == "COMMAND_BLOCKED"

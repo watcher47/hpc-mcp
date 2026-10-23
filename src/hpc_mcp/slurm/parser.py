@@ -33,8 +33,8 @@ def parse_sbatch_directives(script: str) -> SlurmResources:
             key = _SHORT.get(key, key)
             if key == "--gres":
                 values["gpus"] = _gpu_count(value)
-                if value is not None:
-                    values["raw_numeric_requests"]["--gres"] = value  # type: ignore[index]
+                values["gpu_gres"] = _gpu_entries(value) or {}
+                values["raw_numeric_requests"]["--gres"] = value or ''  # type: ignore[index]
             elif key in _KNOWN:
                 field = _KNOWN[key]
                 if key in _NUMERIC and value is not None:
@@ -80,10 +80,22 @@ def _positive_integer_or_none(value: str) -> int | None:
 
 
 def _gpu_count(value: str | None) -> int | None:
-    if value is None:
+    entries = _gpu_entries(value)
+    return None if entries is None else sum(entries.values())
+
+
+def _gpu_entries(value: str | None) -> dict[str, int] | None:
+    if not value:
         return None
+    result: dict[str, int] = {}
     for item in value.split(","):
         parts = item.split(":")
-        if parts[0] == "gpu" and len(parts) >= 2:
-            return _positive_integer_or_none(parts[-1])
-    return 0
+        if parts[0] != 'gpu':
+            continue
+        if len(parts) not in (2, 3) or _positive_integer_or_none(parts[-1]) is None:
+            return None
+        gpu_type = parts[1] if len(parts) == 3 else ''
+        if len(parts) == 3 and not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*', gpu_type):
+            return None
+        result[gpu_type] = result.get(gpu_type, 0) + int(parts[-1])
+    return result

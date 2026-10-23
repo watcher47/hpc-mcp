@@ -68,6 +68,9 @@ def test_cli_watch_status_retry_and_missing_context(context, monkeypatch):
     assert "CODEX_CONTEXT_MISSING" in runner.invoke(cli.app, args).output
     monkeypatch.setenv("CODEX_THREAD_ID", "t")
     monkeypatch.setenv("CODEX_SESSION_ID", "s")
+    async def verified():
+        return {"thread_id": "t", "session_id": "s", "cwd": str(context.project.local_root)}
+    monkeypatch.setattr(cli, "verify_local_context", verified)
     result = runner.invoke(cli.app, args)
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["job_id"] == "123"
@@ -91,6 +94,44 @@ def test_config_fingerprint_changes_with_file_bytes(tmp_path):
     assert config_version(path) == first
     path.write_text("second")
     assert config_version(path) != first
+
+
+def test_recover_watch_cli_uses_verified_terminal_and_preserves_job_event(context, monkeypatch):
+    from hpc_mcp.agent import cli
+    watch = context.service.register("cluster", "123", context.project.id,
+        environ={"CODEX_THREAD_ID": "old", "CODEX_SESSION_ID": "old-session"}, cwd=context.project.local_root)
+    event = context.store.record_terminal(watch.id, "COMPLETED", now=1)
+    async def verified():
+        return {"thread_id": "local", "session_id": "local-session", "cwd": str(context.project.local_root)}
+    monkeypatch.setattr(cli, "verify_local_context", verified)
+    monkeypatch.setattr(cli, "build_container", lambda **kwargs: SimpleNamespace(
+        agent_store=context.store, slurm_watch=context.service))
+    args = ["recover-watch", "--server", "cluster", "--job-id", "123",
+            "--project-id", context.project.id, "--event-id", event.id, "--from-thread", "old"]
+    runner = CliRunner()
+    for _ in range(2):
+        result = runner.invoke(cli.app, args)
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["watch"]["thread_id"] == "local"
+    assert len(context.store.events()) == 1 and context.store.events()[0].id == event.id
+    assert context.store.events()[0].send_started_at is None
+    assert context.store.find_watch("cluster", "123").id == watch.id
+
+
+def test_recover_watch_refuses_different_project_directory(context, monkeypatch):
+    from hpc_mcp.agent import cli
+    watch = context.service.register("cluster", "123", context.project.id,
+        environ={"CODEX_THREAD_ID": "old", "CODEX_SESSION_ID": "old"}, cwd=context.project.local_root)
+    event = context.store.record_terminal(watch.id, "COMPLETED", now=1)
+    async def verified():
+        return {"thread_id": "local", "session_id": "local", "cwd": str(context.project.local_root.parent)}
+    monkeypatch.setattr(cli, "verify_local_context", verified)
+    monkeypatch.setattr(cli, "build_container", lambda **kwargs: SimpleNamespace(
+        agent_store=context.store, slurm_watch=context.service))
+    result = CliRunner().invoke(cli.app, ["recover-watch", "--server", "cluster", "--job-id", "123",
+        "--project-id", context.project.id, "--event-id", event.id, "--from-thread", "old"])
+    assert result.exit_code == 1 and "WATCH_RECOVERY_BLOCKED" in result.output
+    assert context.store.find_watch("cluster", "123").thread_id == "old"
 
 
 def test_cli_run_wires_real_slurm_adapter_without_model_or_ssh_at_setup(context, monkeypatch, tmp_path):

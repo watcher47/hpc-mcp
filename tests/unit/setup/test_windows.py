@@ -380,3 +380,29 @@ def test_command_runner_decodes_unicode_without_locale_tracebacks():
     result = windows.run_command([sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes.fromhex('e29883'))"])
     assert result.returncode == 0
     assert result.stdout == "\u2603"
+
+
+def test_startup_verifies_localized_account_when_python_uses_utf8_mode(
+    managed_startup, monkeypatch
+):
+    from hpc_mcp.setup import windows
+
+    startup, scheduler, command = managed_startup
+    account = "实验室电脑\\fixture"
+    root = ET.fromstring(scheduler.xml)
+    root.find(f"{{{windows.NS}}}Triggers/{{{windows.NS}}}LogonTrigger/{{{windows.NS}}}UserId").text = account
+    encoded = ET.tostring(root, encoding="unicode").encode("cp936")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, encoded, b"")
+
+    monkeypatch.setattr(windows.subprocess, "run", run)
+    monkeypatch.setattr(windows.locale, "getpreferredencoding", lambda _=True: "utf-8")
+    monkeypatch.setattr(windows.locale, "getencoding", lambda: "cp936")
+    startup.runner = windows.run_command
+    startup.account_sid_lookup = lambda value: startup.sid if value == account else None
+
+    assert startup.verify([command]) is True
+    assert len(calls) == 1 and calls[0][1] == "/Query"

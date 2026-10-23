@@ -40,6 +40,10 @@ async def preview_remote_submission(
     remote_files: Any, project_id: str, script_path: str
 ) -> SubmissionPreview:
     """Read a project-relative script in bounded chunks and preview it locally."""
+    return create_submission_preview(script_path, await read_remote_script(remote_files, project_id, script_path))
+
+
+async def read_remote_script(remote_files: Any, project_id: str, script_path: str) -> str:
     _validate_path(script_path)
     offset = 0
     chunks: list[str] = []
@@ -49,7 +53,7 @@ async def preview_remote_submission(
             raise ValueError("Slurm script exceeds the 1 MiB preview limit")
         chunks.append(result.content)
         if result.next_offset is None:
-            return create_submission_preview(script_path, "".join(chunks))
+            return "".join(chunks)
         offset = result.next_offset
 
 
